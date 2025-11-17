@@ -6,29 +6,80 @@ HKD加密货币交易所的API网关服务，基于Spring Cloud Gateway实现。
 
 ### 核心功能
 - ✅ **路由转发** - 统一入口，动态路由到各个微服务
-- ✅ **JWT认证** - 基于JWT Token的统一身份验证
+- ✅ **JWT认证** - 通过 gRPC 调用 auth-service 验证 Token（符合微服务架构）
 - ✅ **多维度限流** - IP限流、用户限流、API限流（令牌桶算法）
 - ✅ **熔断降级** - Resilience4j熔断器，服务不可用时优雅降级
+- ✅ **gRPC 集成** - 高性能 gRPC 调用 auth-service
 - ✅ **跨域支持** - CORS配置，支持前端跨域访问
 - ✅ **访问日志** - 记录所有请求的详细日志
 - ✅ **服务发现** - 集成Nacos，自动发现后端服务
 - ✅ **监控指标** - Prometheus指标暴露，支持监控告警
 
+### 🔥 架构亮点：微服务最佳实践
+
+**JWT 认证流程：**
+```
+User Request → Gateway
+                 ↓
+         gRPC Call: auth-service.ValidateToken()
+                 ↓
+         ✅ Token Valid → Inject User Info to Headers
+         ❌ Token Invalid → Return 401
+                 ↓
+         Route to Backend Services
+```
+
+**为什么这样设计？**
+- ✅ **单一职责**：auth-service 是唯一的认证授权中心
+- ✅ **安全性**：JWT 密钥只存在 auth-service，不分散到各个服务
+- ✅ **实时性**：Token 黑名单（登出/强制下线）实时生效
+- ✅ **一致性**：用户权限变更立即生效
+- ✅ **高性能**：gRPC 调用延迟 < 100ms (P99)
+- ✅ **可靠性**：熔断器保护，auth-service 不可用时快速失败
+
 ### 过滤器链
 ```
 请求流程：
   ↓
-[JwtAuthenticationFilter] (-100) - JWT验证，提取用户信息
+[JwtAuthenticationFilter] (-100) - 🔥 gRPC调用auth-service验证Token，提取用户信息
   ↓
-[RateLimitFilter] (-90) - 多维度限流
+[RateLimitFilter] (-90) - 多维度限流（IP/用户/API）
   ↓
 [其他自定义过滤器]
   ↓
-[路由转发]
+[路由转发] - 转发到后端微服务
   ↓
 [熔断降级] - 后端服务不可用时降级
   ↓
 [AccessLogFilter] (LOWEST) - 访问日志记录
+```
+
+### gRPC 集成架构
+```
+┌──────────────────────────────────────────────┐
+│              HKD API Gateway                 │
+│                                              │
+│  JwtAuthenticationFilter                    │
+│         ↓                                    │
+│   AuthServiceClient (gRPC Client)           │
+│         ↓                                    │
+│   CircuitBreaker Protection                 │
+│         ↓                                    │
+│   grpc://auth-service:9013                  │
+└──────────────────┬───────────────────────────┘
+                   │
+                   ↓
+┌──────────────────────────────────────────────┐
+│         Auth Service (gRPC Server)           │
+│                                              │
+│   ValidateToken(accessToken)                │
+│         ↓                                    │
+│   Check JWT Signature                       │
+│   Check Token Blacklist                     │
+│   Check Token Expiration                    │
+│         ↓                                    │
+│   Return: valid + userId + roles            │
+└──────────────────────────────────────────────┘
 ```
 
 ## 技术栈
@@ -37,35 +88,45 @@ HKD加密货币交易所的API网关服务，基于Spring Cloud Gateway实现。
 - **Spring Boot 3.2.0**
 - **Spring Cloud Gateway 2023.0.0**
 - **Spring Cloud Alibaba (Nacos)**
+- **gRPC** (1.58.0) - 高性能服务间通信
+- **Protobuf** (3.24.0) - 接口定义和序列化
 - **Resilience4j** - 熔断降级
 - **Redis** - 限流、缓存
-- **JJWT** - JWT Token处理
 - **Prometheus** - 监控指标
 
 ## 项目结构
 
 ```
 hkd-gateway-service/
-├── src/main/java/com/hkd/gateway/
-│   ├── GatewayApplication.java          # 启动类
-│   ├── config/
-│   │   ├── CorsConfig.java              # CORS配置
-│   │   └── CircuitBreakerConfig.java    # 熔断器配置
-│   ├── filter/
-│   │   ├── JwtAuthenticationFilter.java # JWT验证过滤器
-│   │   ├── RateLimitFilter.java         # 限流过滤器
-│   │   └── AccessLogFilter.java         # 访问日志过滤器
-│   ├── service/
-│   │   ├── JwtService.java              # JWT服务
-│   │   └── TokenBucketRateLimiter.java  # 令牌桶限流器
-│   ├── controller/
-│   │   └── FallbackController.java      # 降级处理器
-│   └── exception/
-│       └── AuthException.java           # 认证异常
-└── src/main/resources/
-    ├── application.yml                  # 主配置文件
-    ├── application-dev.yml              # 开发环境配置
-    └── application-prod.yml             # 生产环境配置
+├── src/main/
+│   ├── java/com/hkd/gateway/
+│   │   ├── GatewayApplication.java                  # 启动类
+│   │   ├── client/
+│   │   │   └── AuthServiceClient.java               # 🔥 gRPC客户端（调用auth-service）
+│   │   ├── config/
+│   │   │   ├── CorsConfig.java                      # CORS配置
+│   │   │   ├── CircuitBreakerConfig.java            # 熔断器配置
+│   │   │   └── AuthServiceCircuitBreakerConfig.java # auth-service专用熔断器
+│   │   ├── filter/
+│   │   │   ├── JwtAuthenticationFilter.java         # JWT验证过滤器（gRPC调用）
+│   │   │   ├── RateLimitFilter.java                 # 限流过滤器
+│   │   │   └── AccessLogFilter.java                 # 访问日志过滤器
+│   │   ├── service/
+│   │   │   └── TokenBucketRateLimiter.java          # 令牌桶限流器
+│   │   ├── controller/
+│   │   │   └── FallbackController.java              # 降级处理器
+│   │   └── exception/
+│   │       └── AuthException.java                   # 认证异常
+│   ├── proto/
+│   │   └── auth_service.proto                       # 🔥 gRPC接口定义
+│   └── resources/
+│       ├── application.yml                          # 主配置文件（含gRPC配置）
+│       ├── application-dev.yml                      # 开发环境配置
+│       └── application-prod.yml                     # 生产环境配置
+└── target/generated-sources/
+    └── protobuf/                                    # Maven自动生成的gRPC代码
+        ├── java/                                    # Protobuf Java类
+        └── grpc-java/                               # gRPC Stub类
 ```
 
 ## 配置说明
@@ -76,10 +137,10 @@ hkd-gateway-service/
 |---------|------|--------|
 | `SERVER_PORT` | 服务端口 | 8000 |
 | `NACOS_SERVER` | Nacos服务地址 | localhost:8848 |
+| `AUTH_SERVICE_GRPC_URL` | 🔥 auth-service gRPC地址 | static://localhost:9013 |
 | `REDIS_HOST` | Redis主机 | localhost |
 | `REDIS_PORT` | Redis端口 | 6379 |
 | `REDIS_PASSWORD` | Redis密码 | hkd_redis_2024 |
-| `JWT_SECRET` | JWT密钥 | *请生产环境修改* |
 
 ### 路由配置
 

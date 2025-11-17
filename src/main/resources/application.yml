@@ -206,6 +206,16 @@ management:
       enabled: true
 
 # JWT配置
+# gRPC Client配置
+grpc:
+  client:
+    auth-service:
+      address: ${AUTH_SERVICE_GRPC_URL:static://localhost:9013}
+      negotiationType: plaintext  # 开发环境使用明文，生产环境用TLS
+      enableKeepAlive: true
+      keepAliveTime: 30s
+      keepAliveTimeout: 10s
+
 hkd:
   jwt:
     secret: ${JWT_SECRET:hkd_jwt_secret_key_please_change_in_production_2024}

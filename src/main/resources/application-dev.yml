@@ -1,0 +1,22 @@
+spring:
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+      config:
+        server-addr: localhost:8848
+
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      password: hkd_redis_2024
+
+hkd:
+  jwt:
+    secret: hkd_jwt_secret_key_dev_2024
+
+logging:
+  level:
+    com.hkd.gateway: DEBUG
+    org.springframework.cloud.gateway: DEBUG

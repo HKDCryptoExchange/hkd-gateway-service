@@ -1,0 +1,245 @@
+spring:
+  application:
+    name: hkd-gateway-service
+
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:dev}
+
+  cloud:
+    nacos:
+      discovery:
+        server-addr: ${NACOS_SERVER:localhost:8848}
+        namespace: ${NACOS_NAMESPACE:public}
+        group: DEFAULT_GROUP
+      config:
+        server-addr: ${NACOS_SERVER:localhost:8848}
+        file-extension: yml
+        namespace: ${NACOS_NAMESPACE:public}
+        group: DEFAULT_GROUP
+
+    gateway:
+      # 路由配置
+      routes:
+        # 用户服务路由
+        - id: user-service
+          uri: lb://hkd-user-service
+          predicates:
+            - Path=/api/v1/users/**
+          filters:
+            - StripPrefix=2
+
+        # KYC服务路由
+        - id: kyc-service
+          uri: lb://hkd-kyc-service
+          predicates:
+            - Path=/api/v1/kyc/**
+          filters:
+            - StripPrefix=2
+
+        # 认证服务路由
+        - id: auth-service
+          uri: lb://hkd-auth-service
+          predicates:
+            - Path=/api/v1/auth/**
+          filters:
+            - StripPrefix=2
+
+        # 账户服务路由
+        - id: account-service
+          uri: lb://hkd-account-service
+          predicates:
+            - Path=/api/v1/accounts/**
+          filters:
+            - StripPrefix=2
+
+        # 钱包服务路由
+        - id: wallet-service
+          uri: lb://hkd-wallet-service
+          predicates:
+            - Path=/api/v1/wallets/**
+          filters:
+            - StripPrefix=2
+
+        # 充值服务路由
+        - id: deposit-service
+          uri: lb://hkd-deposit-service
+          predicates:
+            - Path=/api/v1/deposits/**
+          filters:
+            - StripPrefix=2
+
+        # 提现服务路由
+        - id: withdraw-service
+          uri: lb://hkd-withdraw-service
+          predicates:
+            - Path=/api/v1/withdrawals/**
+          filters:
+            - StripPrefix=2
+
+        # 资产服务路由
+        - id: asset-service
+          uri: lb://hkd-asset-service
+          predicates:
+            - Path=/api/v1/assets/**
+          filters:
+            - StripPrefix=2
+
+        # 订单网关路由
+        - id: order-gateway
+          uri: lb://hkd-order-gateway
+          predicates:
+            - Path=/api/v1/orders/**
+          filters:
+            - StripPrefix=2
+            - name: CircuitBreaker
+              args:
+                name: orderCircuitBreaker
+                fallbackUri: forward:/fallback/order
+
+        # 撮合引擎路由（直连，不通过Nacos）
+        - id: matching-engine
+          uri: ${MATCHING_ENGINE_URL:http://localhost:8080}
+          predicates:
+            - Path=/api/v1/matching/**
+          filters:
+            - StripPrefix=2
+
+        # 清算服务路由
+        - id: settlement-service
+          uri: lb://hkd-settlement-service
+          predicates:
+            - Path=/api/v1/settlements/**
+          filters:
+            - StripPrefix=2
+
+        # 行情服务路由（HTTP）
+        - id: market-service-http
+          uri: lb://hkd-market-service
+          predicates:
+            - Path=/api/v1/market/**
+          filters:
+            - StripPrefix=2
+
+        # 行情服务路由（WebSocket）
+        - id: market-service-ws
+          uri: lb:ws://hkd-market-service
+          predicates:
+            - Path=/ws/market/**
+          filters:
+            - StripPrefix=1
+
+        # 风控服务路由
+        - id: risk-service
+          uri: lb://hkd-risk-service
+          predicates:
+            - Path=/api/v1/risk/**
+          filters:
+            - StripPrefix=2
+
+        # 通知服务路由
+        - id: notify-service
+          uri: lb://hkd-notify-service
+          predicates:
+            - Path=/api/v1/notifications/**
+          filters:
+            - StripPrefix=2
+
+        # 管理后台服务路由
+        - id: admin-service
+          uri: lb://hkd-admin-service
+          predicates:
+            - Path=/api/v1/admin/**
+          filters:
+            - StripPrefix=2
+
+      # 默认过滤器（应用于所有路由）
+      default-filters:
+        - DedupeResponseHeader=Access-Control-Allow-Credentials Access-Control-Allow-Origin
+
+      # HTTP客户端配置
+      httpclient:
+        connect-timeout: 3000
+        response-timeout: 30s
+        pool:
+          type: elastic
+          max-connections: 1000
+          max-idle-time: 30s
+          max-life-time: 60s
+
+      # Netty配置
+      netty:
+        worker-threads: 8
+        boss-threads: 1
+
+  # Redis配置（用于限流和缓存）
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:hkd_redis_2024}
+      database: ${REDIS_DB:0}
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 2
+          max-wait: -1ms
+
+server:
+  port: ${SERVER_PORT:8000}
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,gateway
+      base-path: /actuator
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+    tags:
+      application: ${spring.application.name}
+  health:
+    redis:
+      enabled: true
+
+# JWT配置
+hkd:
+  jwt:
+    secret: ${JWT_SECRET:hkd_jwt_secret_key_please_change_in_production_2024}
+    access-token-expire: 900  # 15分钟 (秒)
+    refresh-token-expire: 2592000  # 30天 (秒)
+
+  # 限流配置
+  rate-limit:
+    ip:
+      capacity: 100  # 令牌桶容量
+      refill-rate: 100  # 每秒补充令牌数
+    user:
+      default-capacity: 10
+      vip-capacity: 50
+    api:
+      trading-capacity: 5
+      market-capacity: 20
+      default-capacity: 10
+
+  # 白名单配置（不需要JWT验证的路径）
+  auth:
+    whitelist:
+      - /api/v1/auth/**
+      - /api/v1/market/public/**
+      - /actuator/**
+      - /health
+      - /metrics
+
+logging:
+  level:
+    root: INFO
+    com.hkd.gateway: DEBUG
+    org.springframework.cloud.gateway: DEBUG
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n"
+  file:
+    name: logs/hkd-gateway.log
